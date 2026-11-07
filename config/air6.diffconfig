@@ -2,3 +2,6 @@ CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_mt6990=y
 CONFIG_TARGET_mediatek_mt6990_DEVICE_softbank_air6=y
 CONFIG_PACKAGE_luci=y
+CONFIG_IPV6_TUNNEL=m
+CONFIG_PACKAGE_kmod-ip6-tunnel=y
+CONFIG_PACKAGE_ip-full=y
