@@ -14,6 +14,11 @@ in the fork commit that `fork.lock` pins; the builds named below as current have
 - Install from the stock firmware on slot A into slot B, and the first boot (repeatedly, 2026-10-26 to 2026-10-31
   11:50, with earlier builds; on 2026-11-01 with the current build 20261101-002232-67934be6, a trial image: about
   75 s after the reboot the status showed `policy=trial`, `timer=armed` and `root=rootfs_b`).
+- Install from the stock firmware on slot A into slot B with build 20261107-095839-67934be6 (a trial image built on
+  GitHub Actions, [ci](../ci.md)), on 2026-11-07: about 40 s after the reboot the status showed `policy=trial`,
+  `timer=armed` and `root=rootfs_b`; on jack 1 the unit handed out an address in 192.168.1.0/24, LuCI answered
+  (HTTP 200), and `trial-commit` kept the slot. The stock record had `uptype=00` (a unit that never took a vendor
+  update), which earlier kit versions refused.
 - The slot marked good by itself at the end of start-up (normal images, repeatedly).
 - Return to the stock firmware by the bootloader after failed boots (2026-10-17, a root file system erased by a test
   script, the retry count starting at 00).
@@ -99,7 +104,7 @@ On earlier builds, from 2026-10-18:
 
 - Installing from a unit whose stock firmware runs from slot B (OpenWrt into slot A from the stock firmware).
 - Another stock firmware version (`pull-fw` warns about the hash and goes on).
-- OpenWrt's network defaults (jack 1 = LAN at 192.168.1.1 with a DHCP server, jack 2 = WAN).
+- OpenWrt's WAN on jack 2 carrying traffic (the LAN side on jack 1 is tested).
 - An image that hangs during start-up: whether the unit resets by itself, so that the bootloader counts the attempt.
 
 ### Updates (sysupgrade)

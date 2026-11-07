@@ -44,7 +44,8 @@ Does not work, or not tried:
 - The 5G/LTE modem is off in the default build: internet only through a cable on jack 2. An optional, experimental
   build includes it; it writes to partitions the stock firmware shares
   ([docs/features/modem.md](docs/features/modem.md))
-- OpenWrt's network defaults (jack 1 = LAN at 192.168.1.1 with a DHCP server, jack 2 = WAN): not tried on a unit
+- OpenWrt's network defaults (jack 1 = LAN at 192.168.1.1 with a DHCP server, jack 2 = WAN): the LAN side is tried
+  on one unit; traffic through jack 2 (WAN) is not
 - A normal image, or a kept trial image, that has finished starting does not return by itself, even if you cannot
   reach it: the ways out are manual ([when you cannot reach the unit](docs/recovery.md))
 - A stock firmware update overwrites the OpenWrt slot (read from the stock update script; not observed)
@@ -146,8 +147,9 @@ Plug the internet connection into jack 2, then:
     ssh root@192.168.1.1 ip -4 addr show wan             # an address
     ssh root@192.168.1.1 ping -c 3 openwrt.org           # three answers
 
-Another board name: do not keep the image. No address or no answers: the image may still be fine, since OpenWrt's
-network defaults have not been tried on a unit; read [step 5](docs/1-try.md#5-check-that-it-works) before you keep it.
+Another board name: do not keep the image. No address or no answers: check the cable is in jack 1 (the stock
+firmware bridges both jacks, OpenWrt makes jack 2 its WAN), then read [step 5](docs/1-try.md#5-check-that-it-works)
+before you keep it.
 
 **6. Keep the trial image** ([details](docs/1-try.md#6-keep-the-trial-image))
 
