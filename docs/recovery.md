@@ -10,9 +10,11 @@ In the commands, `root@DEVICE` is the unit while it runs the stock firmware (its
 ## Check the connection first
 
 - OpenWrt took about 70 seconds to answer in our tests. Wait at least that long after the reboot.
-- The computer must be on jack 1. With OpenWrt's defaults it should get an address in 192.168.1.0/24 (these defaults
-  have not been tried on a unit yet). If it is also connected to another network that uses 192.168.1.0/24,
-  disconnect that network.
+- The computer must be on jack 1. With OpenWrt's defaults it should get an address in 192.168.1.0/24. If it is also
+  connected to another network that uses 192.168.1.0/24, disconnect that network.
+- A cable that worked before the install may be in jack 2: the stock firmware bridges both jacks into its LAN, while
+  OpenWrt makes jack 2 its WAN (switch port 1 is `lan`, port 2 is `wan`; no address, no DHCP server). Move the cable
+  to jack 1. Seen on one unit: the stock switch showed port 2 up, and OpenWrt was unreachable until the cable moved.
 - ssh refuses with a changed host key warning: OpenWrt has new SSH host keys. Run `ssh-keygen -R 192.168.1.1` and
   connect again.
 - If your settings (kept from an earlier slot, or set through `local/files`) change the LAN address, the unit is at
