@@ -50,10 +50,14 @@ collects `out/$STAMP/` and checks the boot image policy. It takes about 1–2 ho
 
 Download the artifact **air6-`$STAMP`** from the run's summary, then on the computer with the unit:
 
-    unzip air6-$STAMP.zip -d out/
+    STAMP=20261107-095839-67934be6           # the artifact name after "air6-"
+    mkdir -p "out/$STAMP"
+    unzip "air6-$STAMP.zip" -d "out/$STAMP"  # the archive holds the files, not the directory
     ./device.sh install root@DEVICE $STAMP
 
-Keep the directory name: it is the build ID that `install`, `upgrade` and `CHECK.txt` refer to.
+The archive unpacks to `boot.img`, `rootfs.img`, `sysupgrade.bin`, `SHA256SUMS` and the records, not to a
+`$STAMP/` directory: create that directory first, as above. Keep its name: it is the build ID that `install`,
+`upgrade` and `CHECK.txt` refer to.
 
 ## What stays where
 
