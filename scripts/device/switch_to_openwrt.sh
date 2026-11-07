@@ -24,8 +24,12 @@ echo "booted=$CUR target=$T"
 
 before=$(get_bootctrl_string)
 echo "bootctrl before=$before"
-[ "$(field PRIORITY "$CU")" = 0f ] && [ "$(field SUCCESS "$CU")" = 01 ] && [ "$(field UP "$CU")" = 01 ] &&
-	[ "$(field PRIORITY "$TU")" = 0e ] || { echo "abort: unexpected bootctrl $before"; exit 1; }
+# uptype 00 is a unit that never completed a vendor update, 01 one after it; both are settled. 02/04 are the
+# vendor's update states: refuse those (see install_openwrt.sh).
+cu_up=$(field UP "$CU")
+[ "$(field PRIORITY "$CU")" = 0f ] && [ "$(field SUCCESS "$CU")" = 01 ] &&
+	{ [ "$cu_up" = 00 ] || [ "$cu_up" = 01 ]; } && [ "$(field PRIORITY "$TU")" = 0e ] ||
+	{ echo "abort: unexpected bootctrl $before"; exit 1; }
 [ "$(sha256sum < "/dev/block/boot_$T" | cut -d' ' -f1)" = "$BOOT_SHA" ] ||
 	{ echo "abort: boot_$T is not the expected image"; exit 1; }
 

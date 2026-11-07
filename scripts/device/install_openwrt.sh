@@ -32,8 +32,13 @@ echo "booted=$CUR target=$T"
 
 before=$(get_bootctrl_string)
 echo "bootctrl before=$before"
-[ "$(field PRIORITY "$CU")" = 0f ] && [ "$(field SUCCESS "$CU")" = 01 ] && [ "$(field UP "$CU")" = 01 ] &&
-	[ "$(field PRIORITY "$TU")" = 0e ] || { echo "abort: unexpected bootctrl $before"; exit 1; }
+# uptype is 00 on a unit that never completed a vendor update and 01 after one; both are settled states (the
+# vendor's change_slot_info treats anything but 02/04 the same). 02 and 04 mean an update is in progress or failed:
+# refuse those. Seen on a factory unit: a uptype 00, success 01.
+cu_up=$(field UP "$CU")
+[ "$(field PRIORITY "$CU")" = 0f ] && [ "$(field SUCCESS "$CU")" = 01 ] &&
+	{ [ "$cu_up" = 00 ] || [ "$cu_up" = 01 ]; } && [ "$(field PRIORITY "$TU")" = 0e ] ||
+	{ echo "abort: unexpected bootctrl $before"; exit 1; }
 [ -b "$BOOT_DEV" ] && [ -b "$ROOTFS_DEV" ] || { echo "abort: $BOOT_DEV or $ROOTFS_DEV missing"; exit 1; }
 ! grep -q "^$(readlink -f "$ROOTFS_DEV") " /proc/mounts || { echo "abort: $ROOTFS_DEV is mounted"; exit 1; }
 [ "$(sha256sum < /tmp/air6-boot.img | cut -d' ' -f1)" = "$BOOT_SHA" ] || { echo "abort: boot image hash"; exit 1; }
