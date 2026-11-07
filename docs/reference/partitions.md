@@ -91,5 +91,7 @@ OpenWrt only reads `raw1`. Its content is specific to the unit.
 
 ## user_data
 
-`user_data` is the stock firmware's `/data` (ext4). OpenWrt does not mount it, write it or format it. Leaving it
-untouched is also what lets a restored stock firmware find its own data.
+`user_data` is the stock firmware's `/data` (ext4), about 3 GiB. The image built here mounts it read-write at
+`/mnt/data` with `block-mount` (the `/etc/config/fstab` in the local overlay), for configuration backups
+(`sysupgrade -b`). It does not format the partition or remove the stock files, so a restored stock firmware still
+finds its own data.
