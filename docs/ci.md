@@ -44,31 +44,37 @@ userspace): the workflow decrypts what was committed.
 
 The run makes room on the runner's disk, decrypts `local.tar.age`, builds the Docker image, fetches the OpenWrt
 fork at the commit in [fork.lock](../fork.lock), starts the build, waits for `status` to say done or failed,
-collects `out/$STAMP/` and checks the boot image policy. It takes about 1–2 hours on the runner's four cores.
+collects `out/$STAMP/`, checks the boot image policy, and encrypts the image with the age key before it uploads
+it. It takes about 1–2 hours on the runner's four cores.
 
 ## Taking the image
 
-Download the artifact **air6-`$STAMP`** from the run's summary, then on the computer with the unit:
+This repository is public, and anyone with a GitHub account can download a run's artifacts. The image carries
+vendor firmware (and, with the modem, vendor userspace) that may not be redistributed, so the run uploads it
+encrypted: artifact **air6-`$STAMP`** holds one file, `$STAMP.tar.age`, encrypted with the age key from the
+one-time setup. On the computer with the unit:
 
     STAMP=20261107-095839-67934be6           # the artifact name after "air6-"
-    mkdir -p "out/$STAMP"
-    unzip "air6-$STAMP.zip" -d "out/$STAMP"  # the archive holds the files, not the directory
+    unzip "air6-$STAMP.zip"                  # writes $STAMP.tar.age
+    age -d -i age-key.txt -o image.tar.gz "$STAMP.tar.age"
+    mkdir -p "out/$STAMP" && tar -xzf image.tar.gz -C "out/$STAMP"
     ./device.sh install root@DEVICE $STAMP
 
-The archive unpacks to `boot.img`, `rootfs.img`, `sysupgrade.bin`, `SHA256SUMS` and the records, not to a
-`$STAMP/` directory: create that directory first, as above. Keep its name: it is the build ID that `install`,
+`age -d -i` takes the identity file from the one-time setup. The decrypted tree holds `boot.img`, `rootfs.img`,
+`sysupgrade.bin`, `SHA256SUMS` and the records. Keep the `out/$STAMP/` name: it is the build ID that `install`,
 `upgrade` and `CHECK.txt` refer to.
 
 ## What stays where
 
 - **The runner** is a fresh machine for each run and is deleted when the run ends. `local.tar.age` is decrypted only
   there; the decrypted files are not cached.
-- **GitHub** keeps the run's log and the artifact for three days (`retention-days: 3` in the workflow). Delete the
-  artifact after downloading it. No build cache is used, so nothing of one build reaches the next.
-- **The repository** keeps `local.tar.age`. Without `age-key.txt` it cannot be read; the age public key alone does
+- **GitHub** keeps the run's log and the encrypted artifact for three days (`retention-days: 3` in the workflow).
+  The artifact is age-encrypted, so a download without the identity file is not readable; delete it after taking
+  the image anyway. No build cache is used, so nothing of one build reaches the next.
+- **The repository** keeps `local.tar.age`. Without the age identity it cannot be read; the public key alone does
   not decrypt it.
-- **The image** is the same file a local build produces and it carries the Wi-Fi firmware, so treat the artifact
-  as private, like `local/`.
+- **The image** is the same file a local build produces and carries the Wi-Fi firmware, but it leaves the runner
+  only encrypted; only the identity holder can open it. Treat the decrypted copy as private, like `local/`.
 
 ## Limits and failures
 
@@ -80,4 +86,6 @@ The archive unpacks to `boot.img`, `rootfs.img`, `sysupgrade.bin`, `SHA256SUMS` 
 - `local.tar.age is missing` or `secret AGE_PRIVATE_KEY is not set`: the one-time setup above.
 - `local/firmware/mt7996 is empty`: run `./build.sh pull-fw [USER@]DEVICE`, then `scripts/encrypt-inputs.sh` again and
   commit the new `local.tar.age`.
-- A failed build uploads **air6-`$STAMP`-logs** (`out/logs-$STAMP/`); the same log files as a local build.
+- A failed build uploads **air6-`$STAMP`-logs**, encrypted the same way: `unzip` it, then
+  `age -d -i age-key.txt -o logs.tar.gz logs-$STAMP.tar.age` and unpack that to `out/logs-$STAMP/`; the same log
+  files as a local build.

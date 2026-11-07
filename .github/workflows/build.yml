@@ -1,5 +1,9 @@
 # Builds the Air 6 image on GitHub's x86_64 runners, for a computer that cannot carry the build (docs/ci.md).
 # Manual only: Actions -> build-air6 -> Run workflow. Nothing runs on a push.
+#
+# This repository is public, and anyone with a GitHub account can download a run's artifacts. The image carries
+# vendor firmware and, with the modem, vendor userspace that may not be redistributed, so the artifacts are
+# encrypted with age before they are uploaded: only the AGE_PRIVATE_KEY holder can open them.
 name: build-air6
 
 on:
@@ -29,6 +33,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    env:
+      # Public key of the age identity in AGE_PRIVATE_KEY; the same one that encrypts local.tar.age.
+      AGE_RECIPIENT: age1842lnzr0jcdea9vqs5kldwxwx6pge4arehz6v85yurn93tqpcphsff7hzf
     steps:
       - name: Check out the kit
         uses: actions/checkout@v4
@@ -93,23 +100,34 @@ jobs:
           ./build.sh collect "$STAMP"
           grep 'boot.img policy' "out/$STAMP/CHECK.txt"
 
-      - name: Copy build logs on failure
-        if: failure() && env.STAMP != ''
-        run: ./build.sh logs "$STAMP" || true
+      - name: Encrypt the image
+        run: |
+          set -o pipefail
+          tar -C "out/$STAMP" -czf - . | age -r "$AGE_RECIPIENT" -o "out/$STAMP.tar.age"
+          ls -lh "out/$STAMP.tar.age"
 
-      - name: Upload the image
+      - name: Copy and encrypt the logs on failure
+        if: failure() && env.STAMP != ''
+        run: |
+          ./build.sh logs "$STAMP" || true
+          if [ -d "out/logs-$STAMP" ]; then
+            set -o pipefail
+            tar -C "out/logs-$STAMP" -czf - . | age -r "$AGE_RECIPIENT" -o "out/logs-$STAMP.tar.age"
+          fi
+
+      - name: Upload the encrypted image
         uses: actions/upload-artifact@v4
         with:
           name: air6-${{ env.STAMP }}
-          path: out/${{ env.STAMP }}/
+          path: out/${{ env.STAMP }}.tar.age
           retention-days: 3
           if-no-files-found: error
 
-      - name: Upload build logs
+      - name: Upload the encrypted build logs
         if: failure() && env.STAMP != ''
         uses: actions/upload-artifact@v4
         with:
           name: air6-${{ env.STAMP }}-logs
-          path: out/logs-${{ env.STAMP }}/
+          path: out/logs-${{ env.STAMP }}.tar.age
           retention-days: 3
           if-no-files-found: warn
