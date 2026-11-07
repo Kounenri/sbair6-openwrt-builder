@@ -1,0 +1,115 @@
+# Builds the Air 6 image on GitHub's x86_64 runners, for a computer that cannot carry the build (docs/ci.md).
+# Manual only: Actions -> build-air6 -> Run workflow. Nothing runs on a push.
+name: build-air6
+
+on:
+  workflow_dispatch:
+    inputs:
+      trial:
+        description: 'Trial image: returns to the other slot about 10 minutes after start-up unless kept'
+        type: boolean
+        default: true
+      all_kmods:
+        description: 'Build every kernel module (config/all-kmods.exclude excepted)'
+        type: boolean
+        default: false
+      modem:
+        description: 'Modem version to include (empty: none; 1: the only version under local/modem/)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-air6
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out the kit
+        uses: actions/checkout@v4
+
+      # The runner ships about 14 GB free; a build needs more than that.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+                      /usr/local/share/chromium /opt/microsoft /opt/pipx
+          sudo apt-get clean
+          df -h /
+
+      - name: Install age
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq age
+
+      # The Wi-Fi firmware and the modem userspace may not be redistributed, so the kit does not carry them and
+      # they are not committed in the clear: scripts/encrypt-inputs.sh writes local.tar.age, and the age identity
+      # is the AGE_PRIVATE_KEY secret. See docs/ci.md.
+      - name: Decrypt local/ inputs
+        env:
+          AGE_PRIVATE_KEY: ${{ secrets.AGE_PRIVATE_KEY }}
+        run: |
+          test -f local.tar.age || { echo "::error::local.tar.age is missing; see docs/ci.md"; exit 1; }
+          test -n "${AGE_PRIVATE_KEY:-}" || { echo "::error::secret AGE_PRIVATE_KEY is not set; see docs/ci.md"; exit 1; }
+          install -m 600 /dev/null age-key.txt
+          printf '%s\n' "$AGE_PRIVATE_KEY" > age-key.txt
+          age -d -i age-key.txt -o local.tar.gz local.tar.age
+          tar -xzf local.tar.gz
+          rm -f age-key.txt local.tar.gz
+          ls local/firmware/mt7996
+
+      - name: Docker image
+        run: ./build.sh image
+
+      - name: Fetch the OpenWrt fork
+        run: ./build.sh fetch
+
+      - name: Build
+        env:
+          AIR6_MODEM: ${{ inputs.modem }}
+        run: |
+          OPT=()
+          [ "${{ inputs.trial }}" = "true" ] && OPT+=(--trial)
+          [ "${{ inputs.all_kmods }}" = "true" ] && OPT+=(--all-kmods)
+          STAMP=$(./build.sh start "${OPT[@]}")
+          test -n "$STAMP" || { echo "::error::no build ID; read the message above"; exit 1; }
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          while :; do
+            OUT=$(./build.sh status "$STAMP")
+            printf '%s\n' "$OUT"
+            case "$OUT" in
+              *'result: done'*) break ;;
+              *'result: failed'*|*'stopped without DONE or FAILED'*)
+                echo "::error::build failed"; exit 1 ;;
+            esac
+            sleep 60
+          done
+
+      - name: Collect and check
+        run: |
+          ./build.sh collect "$STAMP"
+          grep 'boot.img policy' "out/$STAMP/CHECK.txt"
+
+      - name: Copy build logs on failure
+        if: failure() && env.STAMP != ''
+        run: ./build.sh logs "$STAMP" || true
+
+      - name: Upload the image
+        uses: actions/upload-artifact@v4
+        with:
+          name: air6-${{ env.STAMP }}
+          path: out/${{ env.STAMP }}/
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Upload build logs
+        if: failure() && env.STAMP != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: air6-${{ env.STAMP }}-logs
+          path: out/logs-${{ env.STAMP }}/
+          retention-days: 3
+          if-no-files-found: warn

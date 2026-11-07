@@ -85,7 +85,7 @@ jack 1. Each step links to [docs/1-try.md](docs/1-try.md), which says what you s
 If your Docker runs under a context other than the current one (for example rootless Docker), run
 `export DOCKER_CONTEXT=rootless` first.
 
-    git clone https://github.com/rinrin-aismirin/sbair6-openwrt-builder.git
+    git clone https://github.com/Kounenri/sbair6-openwrt-builder.git
     cd sbair6-openwrt-builder           # run all later commands here
     ./build.sh image                    # the Docker image the build runs in (once)
     ./build.sh fetch                    # ends with "openwrt/ at <commit>"
@@ -94,6 +94,9 @@ If your Docker runs under a context other than the current one (for example root
 Stop on an error, an `abort:` line or an ssh error. A `warning:` about a hash from `pull-fw` means another stock
 firmware version: accepted, but not tested. Your SSH key and settings, if you want them in the image, go into
 `local/files/` now.
+
+No x86_64 computer, or one too small for the build? It can run on GitHub Actions instead, from a manual
+workflow: [docs/ci.md](docs/ci.md).
 
 **2. Build** ([details](docs/1-try.md#2-build))
 

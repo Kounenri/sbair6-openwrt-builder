@@ -44,8 +44,12 @@ with root SSH), and `root@192.168.1.1` is the unit while it runs OpenWrt, from a
 
 Get the kit and run all later commands in its directory:
 
-    git clone https://github.com/rinrin-aismirin/sbair6-openwrt-builder.git
+    git clone https://github.com/Kounenri/sbair6-openwrt-builder.git
     cd sbair6-openwrt-builder
+
+The build needs an x86_64 Linux computer with Docker and about 30 GB of free disk. Without one, run it on GitHub
+Actions instead ([ci](ci.md)). `pull-fw` still runs here; its result goes there encrypted, and so do the build steps
+below. `device.sh` stays on the computer that reaches the unit.
 
 If your Docker runs under a context other than the current one (for example rootless Docker), set it first:
 

@@ -5,6 +5,8 @@ how to change it, and what a build leaves behind.
 
 ## Build steps and failures
 
+To run these steps on a temporary x86_64 machine instead of this computer, see [ci.md](ci.md).
+
     ./build.sh start [OPTIONS]         # prints the build ID ($STAMP)
     ./build.sh status $STAMP           # the last line says result: running, done, failed or stopped ...
     ./build.sh collect $STAMP          # copies a finished build to out/$STAMP/ and prints the image check result
