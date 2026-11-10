@@ -53,6 +53,7 @@ These change what is built, not only what is copied into the image. Each is used
 | `--local-config` | `local/diffconfig` | OpenWrt configuration lines added after the kit's own |
 | `--kernel-patches` | `local/kernel-patches/NNN-name.patch` | Patches added to the fork's kernel |
 | `--all-kmods` | `config/all-kmods.exclude` | Every kernel module built as a package |
+| `--all-packages` | `config/all-kmods.exclude`, `AIR6_FEEDS` | Every package of the installed feeds (see [Packages for a public feed](#packages-for-a-public-feed)) |
 
 **`--trial`** adds `air6.trial=1` to the kernel command line of the image (the `/chosen/bootargs` of its device
 tree); the image check reports it as `policy trial`. The policy belongs to the image: it is not carried over to a
@@ -67,9 +68,13 @@ automatically); `start` says so.
 (`target/linux/generic/pending-<kernel>/`). A name that the fork already uses is refused.
 
 **`--all-kmods`** builds every kernel module as a package, except those in `config/all-kmods.exclude`. This also
-changes the kernel itself, so it is a different build, not the same image plus packages. `CONFIG_ALL`,
-`CONFIG_ALL_NONSHARED` and `CONFIG_BUILDBOT` (which also select userspace packages) are refused with or without this
-option.
+changes the kernel itself, so it is a different build, not the same image plus packages.
+
+**`--all-packages`** builds every package of the installed feeds (OpenWrt's `CONFIG_ALL`, which also selects
+`CONFIG_ALL_KMODS` and `CONFIG_ALL_NONSHARED`). The image does not change -- only `=y` packages are installed -- but
+the build takes much longer and `out/$STAMP/packages/` then holds a package feed
+([Packages for a public feed](#packages-for-a-public-feed)). `CONFIG_BUILDBOT` is still refused, and a build
+without this option still refuses `CONFIG_ALL`/`CONFIG_ALL_NONSHARED`.
 
 The modem build is selected with `AIR6_MODEM=1` in front of `./build.sh start`
 ([docs/features/modem.md](features/modem.md)).
@@ -103,6 +108,61 @@ only; the other inputs are in `PROVENANCE`.
 past dependency checks. Every build has its own package signing key. Kernel module packages depend on a kernel
 package version; two builds with the same version are not necessarily built from the same sources, so the version
 alone does not make another build's modules safe to use.
+
+## Packages for a public feed
+
+A normal build keeps only the packages its image needs (169 for the default image). `--all-packages` builds every
+package of the installed feeds, so `out/$STAMP/packages/` can be served as an apk repository that the build's own
+image can use.
+
+| What | Size |
+| --- | --- |
+| Every feed | about 9,800 packages, about 3.3 GB of `.apk` |
+| `AIR6_FEEDS="packages luci"` (base + these) | about 9,100 packages, about 2.9 GB |
+| Work tree during the build | about 60--110 GB; 150 GB free is the practical minimum |
+| Time | roughly 4--10 h on 8--16 cores, 12--24 h on 4 |
+
+The package counts and sizes are measured on the snapshot feeds (aarch64); the work tree and the times are estimates
+for one target.
+
+`AIR6_FEEDS` limits the feeds that are installed, and with them what gets built. The base packages (base-files,
+busybox, the target itself) live in the tree, not in a feed, so `AIR6_FEEDS="packages luci"` is base + luci +
+packages. Leaving out `routing`, `telephony` and `video` saves only about 700 packages and 400 MB: the `packages`
+feed is the bulk of both.
+
+With `--all-packages` the build passes `IGNORE_ERRORS=m`, so a package that does not build on this target is skipped
+instead of ending the run (the packages that are only built are `m`; the image's are `y`). Set
+`AIR6_IGNORE_ERRORS=` (empty) to stop at the first error, or `n` to ignore more.
+
+**The image has to point at the feed.** `AIR6_REPO_BASE=https://packages.example.com/air6` makes
+`/etc/apk/repositories.d/distfeeds.list` in that image point at `https://packages.example.com/air6/<build ID>`, and
+`PROVENANCE` records it as `repo url:`. Without it the image keeps OpenWrt's own snapshot URLs, which do not exist
+for this target (the target is not upstream, so `apk update` answers 404).
+
+**Publishing.** `scripts/publish-feed.sh STAMP DEST` writes the tree in the layout `distfeeds.list` expects
+(`targets/mediatek/mt6990/packages/`, `packages/<arch>/<feed>/`, `keys/`) to a local directory or to
+`[user@]host:/path`, and points `DEST/latest` at it. Serve `DEST` over HTTP(S) with any static server. Every index
+and `.apk` is signed, so plain HTTP does not lose integrity; HTTPS also hides what a unit installs.
+
+A feed that built no package has no `packages.adb`; the image still lists it in `distfeeds.list`, so `apk` reports
+that URL as unavailable and uses the others (`PROVENANCE` names these feeds). `--all-packages` fills every installed
+feed, and `AIR6_FEEDS` keeps the unused ones out of the image altogether.
+
+`out/$STAMP/keys/public-key.pem` is the public half of the build's signing key; the image of the same build trusts
+it in `/etc/apk/keys/`. A feed of another build is not trusted: either copy that build's `keys/public-key.pem` into
+`/etc/apk/keys/` on the unit, or keep one key pair for all builds. Never publish the private key (`private-key.pem`
+in the build tree).
+
+The URL is part of the image: a unit that installs a later build points at that build's tree, so keep the older
+trees online for units that were not updated. Do not publish a build made with `AIR6_MODEM`: its packages carry
+stock vendor userspace that may not be redistributed ([features/modem.md](features/modem.md)).
+
+All together, for a unit that installs from your own server:
+
+    AIR6_FEEDS="packages luci" AIR6_REPO_BASE=https://packages.example.com/air6 ./build.sh start --all-packages
+    # start prints the build ID; wait until './build.sh status ID' says "result: done"
+    ./build.sh collect ID
+    scripts/publish-feed.sh ID user@packages.example.com:/srv/air6
 
 ## What may be passed on
 

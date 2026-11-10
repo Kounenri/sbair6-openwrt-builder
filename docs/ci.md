@@ -40,6 +40,10 @@ userspace): the workflow decrypts what was committed.
 | --- | --- |
 | `trial` (default on) | `--trial`: the image returns to the other slot about 10 minutes after start-up unless kept |
 | `all_kmods` | `--all-kmods`: build every kernel module (`config/all-kmods.exclude` excepted) |
+
+The workflow has no input for `--all-packages`: a package feed needs the work tree of
+[Packages for a public feed](build.md#packages-for-a-public-feed), which does not fit on the runner's disk. Run that
+build on a machine that has the space.
 | `modem` | `AIR6_MODEM`: empty for none, `1` for the only version under `local/modem/`, or the version name |
 
 The run makes room on the runner's disk, decrypts `local.tar.age`, builds the Docker image, fetches the OpenWrt

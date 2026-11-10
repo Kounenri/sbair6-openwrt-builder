@@ -3,8 +3,9 @@
 # Mounts: /kit (this repo, ro), /fork (the OpenWrt fork, ro), /home/build/work (cache volume). The build tree
 # borrows the fork's git objects, so later debug runs in that tree need /fork mounted as well.
 # Env: FORK_COMMIT (commit to build), FORK_LOCK_COMMIT (fork.lock's commit), RUN_ID, RUN_TOKEN, AIR6_MODEM,
-#   O_FILES / O_CONFIG / O_PATCHES / O_ALLK / O_TRIAL (selected options, "1" or empty), KIT_START (kit build
-#   inputs that differed from the kit commit at start), START_TIME.
+#   O_FILES / O_CONFIG / O_PATCHES / O_ALLK / O_ALLP / O_TRIAL (selected options, "1" or empty), AIR6_FEEDS
+#   (feeds to install; empty: all), REPO_URL (apk feed base of this build; empty: the OpenWrt default), KIT_START
+#   (kit build inputs that differed from the kit commit at start), START_TIME.
 # Result: $W/kit-out/$RUN_ID (boot.img, rootfs.img, SHA256SUMS, PACKAGES.sha256, PROVENANCE, CHECK.txt, packages/,
 # private/); log in $W/kit-status/$RUN_ID/progress.log.
 # Inputs are read from /kit while the build runs (no snapshot). Every record of an input is made from the copy this
@@ -35,6 +36,7 @@ opts=""
 [ -n "$O_CONFIG" ] && opts="$opts --local-config"
 [ -n "$O_PATCHES" ] && opts="$opts --kernel-patches"
 [ -n "$O_ALLK" ] && opts="$opts --all-kmods"
+[ -n "$O_ALLP" ] && opts="$opts --all-packages"
 [ -n "${O_TRIAL:-}" ] && opts="$opts --trial"
 [ -n "${AIR6_MODEM:-}" ] && opts="$opts AIR6_MODEM=$AIR6_MODEM"
 echo "${opts# }" > "$R/options"
@@ -141,10 +143,21 @@ if [ -n "${AIR6_MODEM:-}" ]; then
 	echo "src-link air6 $K/feed" >> feeds.conf
 fi
 ./scripts/feeds update -a > "$S/feeds.log" 2>&1
-./scripts/feeds install -a >> "$S/feeds.log" 2>&1
+if [ -n "${AIR6_FEEDS:-}" ]; then
+	# Only the named feeds: with --all-packages this is what limits the packages that get built. The base packages
+	# (base-files, busybox, the target itself) are in the tree, not in a feed, so they are always built.
+	for f in ${AIR6_FEEDS}; do
+		./scripts/feeds install -a -p "$f" >> "$S/feeds.log" 2>&1 ||
+			{ st "feeds install -a -p $f failed (see $S/feeds.log)"; exit 1; }
+	done
+else
+	./scripts/feeds install -a >> "$S/feeds.log" 2>&1
+fi
+echo "feeds installed: ${AIR6_FEEDS:-all}" > "$R/feeds"
 
 st "config"
-# Order: kit config, local/diffconfig (--local-config), all kernel modules (--all-kmods), modem selections.
+# Order: kit config, local/diffconfig (--local-config), all packages (--all-packages / --all-kmods), the feed URL,
+# modem selections.
 priv "$K/config/air6.diffconfig" air6.diffconfig
 cp "$P/air6.diffconfig" .config
 LC=
@@ -154,17 +167,26 @@ if [ -n "$O_CONFIG" ]; then
 	cat "$LC" >> .config
 fi
 EXCL=
-if [ -n "$O_ALLK" ]; then
+if [ -n "$O_ALLK$O_ALLP" ]; then
 	priv "$K/config/all-kmods.exclude" all-kmods.exclude
 	EXCL=$(grep -v -E '^[[:space:]]*(#.*)?$' "$P/all-kmods.exclude" | awk '{ print $1 }')
 	cp "$P/all-kmods.exclude" "$R/all-kmods.exclude"
+	# CONFIG_ALL selects CONFIG_ALL_KMODS and CONFIG_ALL_NONSHARED itself; both options keep the same exclusions.
 	echo 'CONFIG_ALL_KMODS=y' >> .config
+	[ -z "$O_ALLP" ] || echo 'CONFIG_ALL=y' >> .config
+	why=--all-kmods
+	[ -z "$O_ALLP" ] || why=--all-packages
 	for e in $EXCL; do
 		if [ -n "$LC" ] && awk -F= -v k="CONFIG_PACKAGE_$e" '$1 == k && ($2 == "y" || $2 == "m") { f = 1 } END { exit !f }' "$LC"; then
-			st "local/diffconfig selects $e, which --all-kmods leaves out (config/all-kmods.exclude)"; exit 1
+			st "local/diffconfig selects $e, which $why leaves out (config/all-kmods.exclude)"; exit 1
 		fi
 		echo "# CONFIG_PACKAGE_$e is not set" >> .config
 	done
+fi
+# The apk feed base of this build (scripts/publish-feed.sh): the image's distfeeds.list is generated from it.
+if [ -n "${REPO_URL:-}" ]; then
+	echo "CONFIG_VERSION_REPO=\"$REPO_URL\"" >> .config
+	echo "$REPO_URL" > "$R/repo-url"
 fi
 # The feed "air6" exists only in this build: keep it out of the unit's apk repository list.
 [ -z "${AIR6_MODEM:-}" ] || printf 'CONFIG_PACKAGE_kmod-mt6990-modem=y\nCONFIG_PACKAGE_air6-modem=y\nCONFIG_PACKAGE_luci-app-air6-modem=y\n# CONFIG_FEED_air6 is not set\n' >> .config
@@ -174,23 +196,34 @@ grep -q '^CONFIG_TARGET_mediatek_mt6990_DEVICE_softbank_air6=y$' .config || { st
 [ -z "${AIR6_MODEM:-}" ] || grep -q '^CONFIG_PACKAGE_luci-app-air6-modem=y$' .config || { st "modem packages not selectable (feed air6)"; exit 1; }
 [ -z "${AIR6_MODEM:-}" ] || grep -q '^# CONFIG_FEED_air6 is not set$' .config || { st "feed air6 would be listed on the unit"; exit 1; }
 # The resolved configuration must be what the options asked for (checked before the long build).
-# Stricter than "only without --all-kmods": these select userspace packages too, which the kit does not support.
-for s in ALL BUILDBOT ALL_NONSHARED; do
-	grep -q "^CONFIG_$s=y$" .config && { st "CONFIG_$s=y is set (not supported; --all-kmods selects kernel modules only)"; exit 1; }
+# CONFIG_ALL selects CONFIG_ALL_KMODS and CONFIG_ALL_NONSHARED; only --all-packages may set CONFIG_ALL.
+grep -q '^CONFIG_BUILDBOT=y$' .config && { st "CONFIG_BUILDBOT=y is set (not supported)"; exit 1; }
+for s in ALL ALL_NONSHARED ALL_KMODS; do
+	grep -q "^CONFIG_$s=y$" .config || continue
+	case "$s:$O_ALLP$O_ALLK" in
+	ALL:1*|ALL_NONSHARED:1*|ALL_KMODS:*1) ;;
+	*) st "CONFIG_$s=y is set without the option that asks for it (--all-packages / --all-kmods)"; exit 1 ;;
+	esac
 done
-if [ -n "$O_ALLK" ]; then
-	grep -q '^CONFIG_ALL_KMODS=y$' .config || { st "--all-kmods: CONFIG_ALL_KMODS is not set after defconfig"; exit 1; }
+if [ -n "$O_ALLP" ]; then
+	grep -q '^CONFIG_ALL=y$' .config || { st "--all-packages: CONFIG_ALL is not set after defconfig"; exit 1; }
+	grep -q '^CONFIG_ALL_NONSHARED=y$' .config || { st "--all-packages: CONFIG_ALL_NONSHARED is not set after defconfig"; exit 1; }
+fi
+if [ -n "$O_ALLK$O_ALLP" ]; then
+	grep -q '^CONFIG_ALL_KMODS=y$' .config || { st "CONFIG_ALL_KMODS is not set after defconfig"; exit 1; }
 	absent=
 	for e in $EXCL; do
 		if awk -F= -v k="CONFIG_PACKAGE_$e" '$1 == k && ($2 == "y" || $2 == "m") { f = 1 } END { exit !f }' .config; then
-			st "--all-kmods: $e is selected after defconfig (a dependency?)"; exit 1
+			st "$e is selected after defconfig (a dependency?)"; exit 1
 		fi
 		# No line at all: not selected either (for example its feed is not used, or Kconfig did not write the symbol).
 		grep -q -x -F "# CONFIG_PACKAGE_$e is not set" .config || absent="$absent $e"
 	done
 	echo "verified: CONFIG_ALL_KMODS=y; left out: $(echo $EXCL)${absent:+; not present in the resolved .config:$absent}" > "$R/all-kmods-verified"
-else
-	grep -q '^CONFIG_ALL_KMODS=y$' .config && { st "CONFIG_ALL_KMODS=y is set without --all-kmods"; exit 1; }
+fi
+if [ -n "${REPO_URL:-}" ]; then
+	grep -q -x -F "CONFIG_VERSION_REPO=\"$REPO_URL\"" .config ||
+		{ st "CONFIG_VERSION_REPO is not the requested value after defconfig"; exit 1; }
 fi
 if [ -n "$LC" ]; then
 	bad=
@@ -209,9 +242,14 @@ fi
 priv .config openwrt.config
 
 st "download"
-make download -j8 > "$S/download.log" 2>&1
+# With --all-packages a single package that does not build on this target must not throw away the whole run: the
+# buildbot-style IGNORE_ERRORS=m skips the packages that are only selected to be built (m), not those in the image (y).
+IGN=${AIR6_IGNORE_ERRORS:-}
+[ -z "$O_ALLP" ] || IGN=${IGN:-m}
+printf '%s\n' "${IGN:-none}" > "$R/ignore-errors"
+make download -j8 ${IGN:+IGNORE_ERRORS=$IGN} > "$S/download.log" 2>&1
 st "build"
-make -j"$(nproc)" > "$S/build.log" 2>&1
+make -j"$(nproc)" ${IGN:+IGNORE_ERRORS=$IGN} > "$S/build.log" 2>&1
 KCONF=$(ls -d build_dir/target-*/linux-mediatek_mt6990/linux-*/.config)
 priv "$KCONF" kernel.config
 

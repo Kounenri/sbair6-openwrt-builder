@@ -17,6 +17,8 @@
 #   --local-config                    add local/diffconfig to the build configuration (not used by default)
 #   --kernel-patches                  add local/kernel-patches/*.patch to the kernel patches (not used by default)
 #   --all-kmods                       build every kernel module as a package (config/all-kmods.exclude excepted)
+#   --all-packages                    build every package of the installed feeds, not only those the image needs
+#                                     (implies --all-kmods; for a package feed, see docs/build.md)
 #   --trial                           trial image: air6.trial=1 on the kernel command line; a start of a slot not
 #                                     yet committed arms a timer that returns to the other slot after 10 minutes
 #                                     unless 'air6-slot trial commit' runs (check 'air6-slot status' for timer=armed)
@@ -27,6 +29,10 @@
 #   AIR6_VOLUME=NAME                  Docker volume for downloads and the build tree (default: air6-kit-work)
 #   AIR6_SSH="ssh -i KEY ..."         ssh command for pull-fw (default: ssh)
 #   AIR6_MODEM=1 | VERSION            start: include the optional modem support with the files from pull-modem
+#   AIR6_FEEDS="packages luci"        start: install only these feeds (default: all of config/feeds.conf);
+#                                     base is always in the tree, so this gives base + the listed feeds
+#   AIR6_REPO_BASE=URL                start: the image's apk feeds point at URL/<build ID>; publish that build
+#                                     there with scripts/publish-feed.sh (details in docs/build.md)
 # A build reads the kit, local/ and the fork checkout while it runs: do not change them until it is done or failed.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -126,13 +132,14 @@ pull-modem)
 	echo "$OUT: $(grep -c . "$OUT/SHA256SUMS") files, version $VER"; cat "$OUT/MODEM_VERSION" ;;
 start)
 	shift
-	O_FILES=1 O_CONFIG= O_PATCHES= O_ALLK= O_TRIAL=
+	O_FILES=1 O_CONFIG= O_PATCHES= O_ALLK= O_ALLP= O_TRIAL=
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--no-local-files) O_FILES= ;;
 		--local-config) O_CONFIG=1 ;;
 		--kernel-patches) O_PATCHES=1 ;;
 		--all-kmods) O_ALLK=1 ;;
+		--all-packages) O_ALLP=1 ;;
 		--trial) O_TRIAL=1 ;;
 		--*) echo "unknown option: $1" >&2; exit 2 ;;
 		*) break ;;
@@ -175,10 +182,26 @@ start)
 	elif [ -d local/kernel-patches ]; then
 		echo "note: local/kernel-patches/ is present and not used (add --kernel-patches to use it)" >&2
 	fi
-	if [ -n "$O_ALLK" ]; then
+	if [ -n "$O_ALLK$O_ALLP" ]; then
 		bad=$(grep -v -E '^[[:space:]]*(#.*)?$' config/all-kmods.exclude | grep -v -E '^[A-Za-z0-9._+-]+ # [^[:space:]].*$' || true)
 		[ -z "$bad" ] || { echo "config/all-kmods.exclude: malformed line(s) (\"package # reason\"):" >&2; echo "$bad" >&2; exit 1; }
 	fi
+	# AIR6_FEEDS limits which feeds are installed, so --all-packages only builds their packages. Names are those of
+	# config/feeds.conf ("air6" is the modem feed of this kit, added by the build when AIR6_MODEM is set).
+	FEEDS=${AIR6_FEEDS:-}
+	if [ -n "$FEEDS" ]; then
+		known=" $(awk '$1 ~ /^src-/ { print $2 }' config/feeds.conf | tr '\n' ' ')air6 "
+		for f in $FEEDS; do
+			case "$known" in
+			*" $f "*) ;;
+			*) echo "AIR6_FEEDS: unknown feed '$f' (config/feeds.conf has: $(awk '$1 ~ /^src-/ { printf "%s ", $2 }' config/feeds.conf))" >&2; exit 2 ;;
+			esac
+		done
+		case " $FEEDS " in
+		*" air6 "*) [ -n "$MODEM" ] || { echo "AIR6_FEEDS: 'air6' is the modem feed; it exists only with AIR6_MODEM" >&2; exit 2; } ;;
+		esac
+	fi
+	[ -z "$O_ALLP" ] || [ -n "$FEEDS" ] || echo "note: --all-packages builds every feed in config/feeds.conf (set AIR6_FEEDS to build fewer)" >&2
 	if [ -n "$O_FILES" ] && [ -d local/files ]; then
 		notes=$(cd local/files && find . \( -type f -o -type l \) | sed 's|^\./||' | LC_ALL=C sort | grep -E \
 			'^(lib/modules/|lib/firmware/|etc/modules\.conf$|etc/modules\.d/|etc/init\.d/|etc/rc\.d/|etc/uci-defaults/|lib/apk/|etc/apk/)' || true)
@@ -188,6 +211,15 @@ start)
 	KIT_START=$(build/kit-inputs.sh "$PWD")
 	ID=$(date +%Y%m%d-%H%M%S)-${C:0:8}
 	TOKEN=$(tr -d '-' < /proc/sys/kernel/random/uuid)
+	# The image's apk feeds: URL/<build ID>, so a published feed never mixes builds. scripts/publish-feed.sh
+	# writes out/ID in the layout these URLs expect.
+	REPO_URL=
+	if [ -n "${AIR6_REPO_BASE:-}" ]; then
+		case "$AIR6_REPO_BASE" in
+		http://*|https://*) REPO_URL=${AIR6_REPO_BASE%/}/$ID ;;
+		*) echo "AIR6_REPO_BASE: expected an http:// or https:// URL, got '$AIR6_REPO_BASE'" >&2; exit 2 ;;
+		esac
+	fi
 	# Reserve the volume: create the worker before touching the volume, start it by the ID Docker returned.
 	if cur=$($D inspect -f '{{.Id}} {{.State.Status}} {{index .Config.Labels "air6.run"}}' "$WORKER" 2>/dev/null); then
 		read -r cid st run <<< "$cur"
@@ -205,7 +237,8 @@ start)
 	cid=$($D create --name "$WORKER" --label "air6.run=$ID" --label "air6.token=$TOKEN" --label "air6.volume=$VOL" \
 		-e FORK_COMMIT="$C" -e FORK_LOCK_COMMIT="$FORK_COMMIT" -e RUN_ID="$ID" -e RUN_TOKEN="$TOKEN" \
 		-e AIR6_MODEM="$MODEM" -e O_FILES="$O_FILES" -e O_CONFIG="$O_CONFIG" -e O_PATCHES="$O_PATCHES" \
-		-e O_ALLK="$O_ALLK" -e O_TRIAL="$O_TRIAL" -e KIT_START="$KIT_START" -e KIT_HEAD_START="$(git rev-parse HEAD)" \
+		-e O_ALLK="$O_ALLK" -e O_ALLP="$O_ALLP" -e O_TRIAL="$O_TRIAL" -e AIR6_FEEDS="$FEEDS" \
+		-e REPO_URL="$REPO_URL" -e KIT_START="$KIT_START" -e KIT_HEAD_START="$(git rev-parse HEAD)" \
 		-e START_TIME="$(date -u '+%F %T')" \
 		-v "$PWD:/kit:ro" -v "$FORK_DIR:/fork:ro" -v "$VOL:/home/build/work" "$IMG" /kit/build/build-in-container.sh) ||
 		{ echo "volume $VOL is in use (could not create $WORKER)" >&2; exit 1; }
@@ -289,5 +322,5 @@ logs)
 	ls "out/logs-$ID"
 	echo "the last step is in progress.log; its log file is named after the step" ;;
 *)
-	sed -n '2,30p' "$0"; exit 2 ;;
+	awk 'NR > 1 && /^set -euo pipefail$/ { exit } NR > 1' "$0"; exit 2 ;;
 esac

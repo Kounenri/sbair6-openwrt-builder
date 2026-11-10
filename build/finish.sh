@@ -35,6 +35,34 @@ rm -rf "$WORK"
 cp -a "$BIN/packages" "$OUT/packages/target"
 cp -a "$T/bin/packages/." "$OUT/packages/feeds/"
 
+# The repository layout of this build (scripts/publish-feed.sh): the image's distfeeds point at
+# %U/targets/%S/packages and %U/packages/%A/<feed>, so a published feed has to use these paths.
+board=$(sed -n 's/^CONFIG_TARGET_BOARD="\(.*\)"$/\1/p' "$T/.config")
+subt=$(sed -n 's/^CONFIG_TARGET_SUBTARGET="\(.*\)"$/\1/p' "$T/.config")
+arch=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\(.*\)"$/\1/p' "$T/.config")
+if [ -n "$board" ] && [ -n "$subt" ] && [ -n "$arch" ]; then
+	printf 'targets/%s/%s/packages\npackages/%s\n' "$board" "$subt" "$arch" > "$OUT/repo-layout"
+else
+	echo "warning: no target/arch in the resolved .config; repo-layout not written" >&2
+fi
+# The public half of the build's package signing key: base-files installs it into the image's /etc/apk/keys, so a
+# feed signed by this build verifies there. Publish it with the packages; the private key stays in the build tree.
+if [ -s "$T/public-key.pem" ]; then
+	mkdir -p "$OUT/keys"
+	cp "$T/public-key.pem" "$OUT/keys/public-key.pem"
+else
+	echo "warning: the build tree has no public-key.pem; the packages may be unsigned" >&2
+fi
+# A feed that built no package has no index, but the image still lists it in distfeeds.list: apk reports that URL as
+# unavailable and uses the others. Not an error, but it explains the "unavailable" lines on the unit.
+empty=
+for d in "$OUT/packages/feeds"/*/*; do
+	[ -d "$d" ] || continue
+	[ -f "$d/packages.adb" ] || empty="$empty $(basename "$(dirname "$d")")/$(basename "$d")"
+done
+[ -z "$empty" ] || echo "warning: feeds without packages (apk will report them unavailable):$empty" >&2
+printf '%s' "$empty" > "$R/empty-feeds"
+
 (cd "$OUT" && find packages -type f | LC_ALL=C sort | xargs -r sha256sum) > "$OUT/PACKAGES.sha256"
 
 kit_rev=$(git -c safe.directory="$K" -C "$K" rev-parse HEAD 2>/dev/null || echo none)
@@ -68,6 +96,8 @@ fw_origin() { if [ -f "$R/firmware-replaced" ] && grep -q -x -F "$1" "$R/firmwar
 	echo "started: $START_TIME UTC"
 	echo "built: $(date -u '+%F %T') UTC"
 	echo "options: $(cat "$R/options" | grep . || echo none)"
+	echo "feeds: $(cat "$R/feeds" 2>/dev/null || echo all)"
+	echo "ignore errors: $(cat "$R/ignore-errors" 2>/dev/null || echo none)"
 	echo "class: $class"
 	echo "openwrt fork: $FORK_COMMIT (fork.lock: $FORK_LOCK_COMMIT)"
 	echo "kit: $kit_rev"
@@ -118,6 +148,10 @@ fw_origin() { if [ -f "$R/firmware-replaced" ] && grep -q -x -F "$1" "$R/firmwar
 	done
 	echo "unsigned inputs: $(basename "$KERNEL") $(basename "$DTB") $(basename "$ROOTFS")"
 	echo "packages: $(grep -c . "$OUT/PACKAGES.sha256") files (PACKAGES.sha256), for a unit running this build's image"
+	[ ! -f "$R/repo-url" ] || echo "repo url: $(cat "$R/repo-url")"
+	[ ! -f "$OUT/keys/public-key.pem" ] ||
+		echo "package key: sha256 $(sha256sum < "$OUT/keys/public-key.pem" | cut -d' ' -f1) (public half; the image trusts it)"
+	[ ! -s "$R/empty-feeds" ] || echo "feeds without packages: $(cat "$R/empty-feeds")"
 	echo "kmod-mt6990-modem: $(grep -q '^CONFIG_PACKAGE_kmod-mt6990-modem=y' "$T/.config" && echo selected || echo not selected)"
 	if [ -n "${AIR6_MODEM:-}" ]; then
 		# The stock modem userspace in this image (not redistributable): version and every file (links by target).
