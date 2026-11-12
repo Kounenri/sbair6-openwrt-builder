@@ -141,7 +141,8 @@ skipped instead of ending the run: `m` are the packages that are only built and 
 for this target (the target is not upstream, so `apk update` answers 404).
 
 **Publishing.** `scripts/publish-feed.sh STAMP DEST` writes the tree in the layout `distfeeds.list` expects
-(`targets/mediatek/mt6990/packages/`, `packages/<arch>/<feed>/`, `keys/`) to a local directory or to
+(`targets/mediatek/mt6990/packages/`, `targets/mediatek/mt6990/kmods/<version>-<release>-<vermagic>/`,
+`packages/<arch>/<feed>/`, `keys/`) to a local directory or to
 `[user@]host:/path`, and points `DEST/latest` at it. Serve `DEST` over HTTP(S) with any static server. Every index
 and `.apk` is signed, so plain HTTP does not lose integrity; HTTPS also hides what a unit installs.
 

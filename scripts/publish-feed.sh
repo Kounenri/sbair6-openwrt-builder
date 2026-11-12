@@ -1,6 +1,7 @@
 #!/bin/bash
 # Publishes one build's packages as an apk repository, in the layout the image's distfeeds.list expects:
 #   targets/<board>/<subtarget>/packages/packages.adb
+#   targets/<board>/<subtarget>/kmods/<version>-<release>-<vermagic>/packages.adb
 #   packages/<arch>/<feed>/packages.adb
 #   keys/public-key.pem
 # Usage: scripts/publish-feed.sh STAMP DEST
@@ -17,14 +18,21 @@ OUT=$K/out/$STAMP
 [ -d "$OUT/packages" ] || { echo "no $OUT/packages: build and collect $STAMP first" >&2; exit 1; }
 if [ -f "$OUT/repo-layout" ]; then
 	target=$(sed -n '1p' "$OUT/repo-layout")   # targets/mediatek/mt6990/packages
-	pkgdir=$(sed -n '2p' "$OUT/repo-layout")   # packages/aarch64_cortex-a55_neon-vfpv4
+	kmods=$(sed -n '2p' "$OUT/repo-layout")    # targets/mediatek/mt6990/kmods/... (empty on old builds)
+	pkgdir=$(sed -n '3p' "$OUT/repo-layout")   # packages/aarch64_cortex-a55_neon-vfpv4
 else
 	# A build from before repo-layout: this kit has one board, and the arch is the name under packages/feeds.
 	arch=$(find "$OUT/packages/feeds" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | head -n 1)
 	[ -n "$arch" ] || { echo "$OUT/packages/feeds is empty" >&2; exit 1; }
 	target=targets/mediatek/mt6990/packages
+	kmods=
 	pkgdir=packages/$arch
 	echo "note: no $OUT/repo-layout; assuming $target and $pkgdir" >&2
+fi
+# Two-line repo-layout predates the kmods split.
+if [ -z "$pkgdir" ]; then
+	pkgdir=$kmods
+	kmods=
 fi
 arch=${pkgdir##*/}
 [ -n "$target" ] && [ -n "$arch" ] || { echo "bad repository layout" >&2; exit 1; }
@@ -39,12 +47,17 @@ fi
 TMP=$(mktemp -d) && trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/$target" "$TMP/$pkgdir" "$TMP/keys"
 cp -a "$OUT/packages/target/." "$TMP/$target/"
+if [ -n "$kmods" ] && [ -d "$OUT/packages/kmods/$(basename "$kmods")" ]; then
+	mkdir -p "$TMP/$kmods"
+	cp -a "$OUT/packages/kmods/$(basename "$kmods")/." "$TMP/$kmods/"
+fi
 if [ -d "$OUT/packages/feeds/$arch" ]; then
 	cp -a "$OUT/packages/feeds/$arch/." "$TMP/$pkgdir/"
 fi
 [ ! -f "$OUT/keys/public-key.pem" ] || cp "$OUT/keys/public-key.pem" "$TMP/keys/"
 
 [ -f "$TMP/$target/packages.adb" ] || { echo "no packages.adb in $target" >&2; exit 1; }
+[ -z "$kmods" ] || [ -f "$TMP/$kmods/packages.adb" ] || { echo "no packages.adb in $kmods" >&2; exit 1; }
 # A feed that built no package has no index; it cannot be served. The image of a build without --all-packages still
 # lists such feeds in distfeeds.list, and apk reports them as unavailable (it uses the others).
 empty=
@@ -77,6 +90,7 @@ echo "published $n packages to $DEST/$STAMP (latest -> $STAMP)"
 echo
 echo "Repositories of this build (feed it to a unit that does not have its image's distfeeds):"
 echo "  ${target}/packages.adb"
+[ -z "$kmods" ] || echo "  ${kmods}/packages.adb"
 for d in "$TMP/$pkgdir"/*; do
 	[ -d "$d" ] || continue
 	echo "  ${pkgdir}/$(basename "$d")/packages.adb"

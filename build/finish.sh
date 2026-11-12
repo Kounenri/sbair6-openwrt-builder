@@ -18,7 +18,7 @@ ROOTFS=$(one '*softbank_air6-squashfs-rootfs.img')
 SDK=$X/lg6851f_sign_tool/fg370-2305-opensdk
 TOOL=$SDK/mtk/tools/common/security/tool
 KEYS=$SDK/mtk/tools/common/security/sign_master/hsm_test_keys/RSA2048
-mkdir "$OUT/packages"
+mkdir -p "$OUT/packages"
 WORK=$(mktemp -d) && mkdir -p "$WORK/in"
 
 python3 "$X/scripts/lg6851f_mkbootimg_v2.py" --meta "$X/target/linux/mediatek/image/lg6851f-boot-v2.json" \
@@ -36,12 +36,36 @@ cp -a "$BIN/packages" "$OUT/packages/target"
 cp -a "$T/bin/packages/." "$OUT/packages/feeds/"
 
 # The repository layout of this build (scripts/publish-feed.sh): the image's distfeeds point at
-# %U/targets/%S/packages and %U/packages/%A/<feed>, so a published feed has to use these paths.
+#   %U/targets/%S/packages/packages.adb
+#   %U/targets/%S/kmods/<LINUX_VERSION>-<LINUX_RELEASE>-<LINUX_VERMAGIC>/packages.adb
+#   %U/packages/%A/<feed>/packages.adb
+# Kernel and kmod-* move to their own repository, as on downloads.openwrt.org, and both indexes are signed with the
+# build key.
 board=$(sed -n 's/^CONFIG_TARGET_BOARD="\(.*\)"$/\1/p' "$T/.config")
 subt=$(sed -n 's/^CONFIG_TARGET_SUBTARGET="\(.*\)"$/\1/p' "$T/.config")
 arch=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\(.*\)"$/\1/p' "$T/.config")
+kmods=
 if [ -n "$board" ] && [ -n "$subt" ] && [ -n "$arch" ]; then
-	printf 'targets/%s/%s/packages\npackages/%s\n' "$board" "$subt" "$arch" > "$OUT/repo-layout"
+	kpkg=$(ls "$OUT/packages/target"/kernel-*.apk 2>/dev/null | head -n 1)
+	vermagic=$(cat "$(find "$T/build_dir" -path '*linux-mediatek*' -name .vermagic -print -quit 2>/dev/null)" 2>/dev/null)
+	if [ -n "$kpkg" ] && [ -n "$vermagic" ]; then
+		kver=${kpkg##*/kernel-}; kver=${kver%%~*}
+		krel=$(sed -n 's/^LINUX_RELEASE?=//p' "$T/include/kernel-version.mk"); krel=${krel:-1}
+		kmods="targets/$board/$subt/kmods/$kver-$krel-$vermagic"
+		KDIR="$OUT/packages/kmods/$kver-$krel-$vermagic"
+		mkdir -p "$KDIR"
+		mv "$OUT/packages/target"/kernel-*.apk "$OUT/packages/target"/kmod-*.apk "$KDIR"/
+		HOST_APK="$T/staging_dir/host/bin/apk"
+		KEY="$T/private-key.pem"
+		SIGN=
+		[ ! -s "$KEY" ] || SIGN="--sign $KEY"
+		for d in "$OUT/packages/target" "$KDIR"; do
+			(cd "$d" && "$HOST_APK" mkndx --root "$T" --keys-dir "$T" --allow-untrusted $SIGN --output packages.adb *.apk)
+			(cd "$d" && "$HOST_APK" adbdump --format json packages.adb | \
+				python3 "$T/scripts/make-index-json.py" -f apk -a "$arch" - > index.json)
+		done
+	fi
+	printf 'targets/%s/%s/packages\n%s\npackages/%s\n' "$board" "$subt" "${kmods:-}" "$arch" > "$OUT/repo-layout"
 else
 	echo "warning: no target/arch in the resolved .config; repo-layout not written" >&2
 fi
