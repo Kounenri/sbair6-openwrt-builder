@@ -243,9 +243,10 @@ priv .config openwrt.config
 
 st "download"
 # With --all-packages a single package that does not build on this target must not throw away the whole run: the
-# buildbot-style IGNORE_ERRORS=m skips the packages that are only selected to be built (m), not those in the image (y).
+# buildbot-style IGNORE_ERRORS skips failures of packages that are only built (m) and of source-only ones that have no
+# CONFIG_PACKAGE symbol at all (n, for example a host-only tool like qt5tools), not those in the image (y).
 IGN=${AIR6_IGNORE_ERRORS:-}
-[ -z "$O_ALLP" ] || IGN=${IGN:-m}
+[ -z "$O_ALLP" ] || IGN=${IGN:-n m}
 printf '%s\n' "${IGN:-none}" > "$R/ignore-errors"
 make download -j8 ${IGN:+IGNORE_ERRORS=$IGN} > "$S/download.log" 2>&1
 st "build"

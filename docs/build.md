@@ -130,9 +130,10 @@ busybox, the target itself) live in the tree, not in a feed, so `AIR6_FEEDS="pac
 packages. Leaving out `routing`, `telephony` and `video` saves only about 700 packages and 400 MB: the `packages`
 feed is the bulk of both.
 
-With `--all-packages` the build passes `IGNORE_ERRORS=m`, so a package that does not build on this target is skipped
-instead of ending the run (the packages that are only built are `m`; the image's are `y`). Set
-`AIR6_IGNORE_ERRORS=` (empty) to stop at the first error, or `n` to ignore more.
+With `--all-packages` the build passes `IGNORE_ERRORS="n m"`, so a package that does not build on this target is
+skipped instead of ending the run: `m` are the packages that are only built and `n` the source-only ones that have no
+`CONFIG_PACKAGE` symbol (a host-only tool such as `qt5tools` is one; without `n` its failure ends the build). Set
+`AIR6_IGNORE_ERRORS=` (empty) to stop at the first error, or `n m y` to also skip failures of the image's packages.
 
 **The image has to point at the feed.** `AIR6_REPO_BASE=https://packages.example.com/air6` makes
 `/etc/apk/repositories.d/distfeeds.list` in that image point at `https://packages.example.com/air6/<build ID>`, and
