@@ -18,6 +18,7 @@ ROOTFS=$(one '*softbank_air6-squashfs-rootfs.img')
 SDK=$X/lg6851f_sign_tool/fg370-2305-opensdk
 TOOL=$SDK/mtk/tools/common/security/tool
 KEYS=$SDK/mtk/tools/common/security/sign_master/hsm_test_keys/RSA2048
+rm -rf "$OUT/packages"
 mkdir -p "$OUT/packages"
 WORK=$(mktemp -d) && mkdir -p "$WORK/in"
 
@@ -32,7 +33,8 @@ cp "$ROOTFS" "$OUT/rootfs.img" && truncate -s 134217728 "$OUT/rootfs.img"
 rm -rf "$WORK"
 (cd "$OUT" && sha256sum boot.img rootfs.img > SHA256SUMS)
 
-cp -a "$BIN/packages" "$OUT/packages/target"
+mkdir -p "$OUT/packages/target"
+cp -a "$BIN/packages/." "$OUT/packages/target/"
 cp -a "$T/bin/packages/." "$OUT/packages/feeds/"
 
 # The repository layout of this build (scripts/publish-feed.sh): the image's distfeeds point at

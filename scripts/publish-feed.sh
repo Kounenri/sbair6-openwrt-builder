@@ -7,13 +7,23 @@
 # Usage: scripts/publish-feed.sh STAMP DEST
 #   STAMP  build ID printed by ./build.sh start (out/STAMP/ must have been collected)
 #   DEST   a local directory, or [user@]host:/path (rsync over ssh; no spaces in the path)
+#   --flat write the tree at DEST itself instead of DEST/STAMP (no build ID in the URL, no latest symlink)
 # The tree is written to DEST/STAMP and DEST/latest is a symlink to it. The packages of a build are signed with that
 # build's key, and the image of the same build trusts it, so do not mix builds in one directory.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 K=$(cd "$HERE/.." && pwd)
-STAMP=${1:?usage: scripts/publish-feed.sh STAMP DEST}
-DEST=${2:?usage: scripts/publish-feed.sh STAMP DEST}
+STAMP=${1:?usage: scripts/publish-feed.sh STAMP DEST [--flat]}
+DEST=${2:?usage: scripts/publish-feed.sh STAMP DEST [--flat]}
+FLAT=
+shift 2
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--flat) FLAT=1 ;;
+	*) echo "usage: scripts/publish-feed.sh STAMP DEST [--flat]" >&2; exit 2 ;;
+	esac
+	shift
+done
 OUT=$K/out/$STAMP
 [ -d "$OUT/packages" ] || { echo "no $OUT/packages: build and collect $STAMP first" >&2; exit 1; }
 if [ -f "$OUT/repo-layout" ]; then
@@ -71,22 +81,41 @@ done
 n=$(find "$TMP" -name '*.apk' | wc -l)
 [ "$n" -gt 0 ] || { echo "no .apk in $OUT/packages" >&2; exit 1; }
 
-case "$DEST" in
-*:*)
-	host=${DEST%%:*}
-	path=${DEST#*:}
-	ssh "$host" "mkdir -p '$path'"
-	rsync -a --delete "$TMP/" "$host:$path/$STAMP/"
-	ssh "$host" "ln -sfn '$STAMP' '$path/latest'"
-	;;
-*)
-	mkdir -p "$DEST"
-	rsync -a --delete "$TMP/" "$DEST/$STAMP/"
-	ln -sfn "$STAMP" "$DEST/latest"
-	;;
-esac
-
-echo "published $n packages to $DEST/$STAMP (latest -> $STAMP)"
+if [ -n "$FLAT" ]; then
+	# The build ID is not part of the path: a later build replaces this tree. Devices that keep the URL then see the
+	# newer packages (and the newer signing key), so keep that in mind before publishing another build.
+	case "$DEST" in
+	*:*)
+		host=${DEST%%:*}
+		path=${DEST#*:}
+		ssh "$host" "mkdir -p '$path'"
+		rsync -a --chmod=D755,F644 --delete "$TMP/" "$host:$path/"
+		ssh "$host" "chmod 755 '$path'"
+		;;
+	*)
+		mkdir -p "$DEST"
+		rsync -a --chmod=D755,F644 --delete "$TMP/" "$DEST/"
+		chmod 755 "$DEST"
+		;;
+	esac
+	echo "published $n packages to $DEST (flat, no build ID in the path)"
+else
+	case "$DEST" in
+	*:*)
+		host=${DEST%%:*}
+		path=${DEST#*:}
+		ssh "$host" "mkdir -p '$path'"
+		rsync -a --chmod=D755,F644 --delete "$TMP/" "$host:$path/$STAMP/"
+		ssh "$host" "ln -sfn '$STAMP' '$path/latest'"
+		;;
+	*)
+		mkdir -p "$DEST"
+		rsync -a --chmod=D755,F644 --delete "$TMP/" "$DEST/$STAMP/"
+		ln -sfn "$STAMP" "$DEST/latest"
+		;;
+	esac
+	echo "published $n packages to $DEST/$STAMP (latest -> $STAMP)"
+fi
 echo
 echo "Repositories of this build (feed it to a unit that does not have its image's distfeeds):"
 echo "  ${target}/packages.adb"

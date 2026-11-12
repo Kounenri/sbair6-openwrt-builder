@@ -150,6 +150,10 @@ A feed that built no package has no `packages.adb`; the image still lists it in 
 that URL as unavailable and uses the others (`PROVENANCE` names these feeds). `--all-packages` fills every installed
 feed, and `AIR6_FEEDS` keeps the unused ones out of the image altogether.
 
+`--flat` writes the tree at `DEST` itself: no build ID in the URL and no `latest`. `AIR6_REPO_FLAT=1` makes an
+image point there. Only one build can be served that way -- a later publish replaces the tree, its indexes and its
+signing key.
+
 `out/$STAMP/keys/public-key.pem` is the public half of the build's signing key; the image of the same build trusts
 it in `/etc/apk/keys/`. A feed of another build is not trusted: either copy that build's `keys/public-key.pem` into
 `/etc/apk/keys/` on the unit, or keep one key pair for all builds. Never publish the private key (`private-key.pem`

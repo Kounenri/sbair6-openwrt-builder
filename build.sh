@@ -33,6 +33,7 @@
 #                                     base is always in the tree, so this gives base + the listed feeds
 #   AIR6_REPO_BASE=URL                start: the image's apk feeds point at URL/<build ID>; publish that build
 #                                     there with scripts/publish-feed.sh (details in docs/build.md)
+#   AIR6_REPO_FLAT=1                  start: point at URL itself, matching 'publish-feed.sh --flat' (no build ID)
 # A build reads the kit, local/ and the fork checkout while it runs: do not change them until it is done or failed.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -216,9 +217,11 @@ start)
 	REPO_URL=
 	if [ -n "${AIR6_REPO_BASE:-}" ]; then
 		case "$AIR6_REPO_BASE" in
-		http://*|https://*) REPO_URL=${AIR6_REPO_BASE%/}/$ID ;;
+		http://*|https://*) ;;
 		*) echo "AIR6_REPO_BASE: expected an http:// or https:// URL, got '$AIR6_REPO_BASE'" >&2; exit 2 ;;
 		esac
+		REPO_URL=${AIR6_REPO_BASE%/}
+		[ -n "${AIR6_REPO_FLAT:-}" ] || REPO_URL=$REPO_URL/$ID
 	fi
 	# Reserve the volume: create the worker before touching the volume, start it by the ID Docker returned.
 	if cur=$($D inspect -f '{{.Id}} {{.State.Status}} {{index .Config.Labels "air6.run"}}' "$WORKER" 2>/dev/null); then
