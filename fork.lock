@@ -3,6 +3,6 @@
 # drivers, built only with AIR6_MODEM).
 # `./build.sh fetch` clones it into openwrt/ (git-ignored) and checks out FORK_COMMIT.
 # Format: shell variables (sourced by build.sh).
-FORK_REPO=https://github.com/rinrin-aismirin/openwrt.git
+FORK_REPO=https://github.com/Kounenri/sbair6-openwrt.git
 FORK_BRANCH=air6
-FORK_COMMIT=67934be6ac3ab0ad2013d9c840e5644afae04ac1
+FORK_COMMIT=0f22d9e8456409110266e281d466f69227eb44f9
